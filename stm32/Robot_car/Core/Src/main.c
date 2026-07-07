@@ -93,36 +93,120 @@ static uint32_t pwm_from_percent(TIM_HandleTypeDef *htim, int percent)
     return (uint32_t)((arr * limited) / 100);
 }
 
-static void set_left_motor(int speed)
-{
-    //uint32_t duty = pwm_from_percent(&htim2, speed);
+static int g_commanded_speed = 0;
+
+typedef enum {
+    MOTOR_LED_BRAKE = 1,       /* 1 вспышка за цикл */
+    MOTOR_LED_REVERSE = 2,     /* 2 вспышки — ШИМ на LPWM (назад) */
+    MOTOR_LED_FORWARD = 3,     /* 3 вспышки — ШИМ на RPWM (вперёд) */
+    MOTOR_LED_BOTH_PWM = 4,    /* 4 вспышки — оба ШИМ, торможение/ошибка */
+    MOTOR_LED_EN_FAULT = 0,    /* горит постоянно — L_EN или R_EN не HIGH */
+    MOTOR_LED_PWM_FAULT = 5,   /* 5 вспышек — команда есть, регистры ШИМ = 0 */
+} MotorLedPattern;
+
 /*
-    if (speed > 0) {
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, duty);
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
-    } else if (speed < 0) {
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, duty);
-    } else {
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 0);
-    }*/
+ * BTS7960 в режиме «2 провода» (robot-kit.ru):
+ * L_EN и R_EN постоянно HIGH, скорость — ШИМ на L_PWM или R_PWM.
+ * Вперёд:  L_PWM=0, R_PWM=ШИМ.  Назад: L_PWM=ШИМ, R_PWM=0.
+ * Драйвер 1: PB6=LPWM (TIM4_CH1), PB7=RPWM (TIM4_CH2), PB0=L_EN, PB1=R_EN.
+ * Драйвер 2: PA7=LPWM (TIM3_CH2), PA6=RPWM (TIM3_CH1), PC1=L_EN, PC0=R_EN.
+ */
+static void set_motor_tim4(int speed);
+static void set_motor_tim3(int speed);
+
+static void motor_apply_drive_mode(void)
+{
+#if MOTOR_GPIO_FULL_POWER_TEST
+#if MOTOR_DRIVE_MODE == MOTOR_DRIVE_FORWARD
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
+    g_commanded_speed = MOTOR_PWM_PERCENT;
+#else
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
+    g_commanded_speed = -MOTOR_PWM_PERCENT;
+#endif
+#else
+#if MOTOR_DRIVE_MODE == MOTOR_DRIVE_FORWARD
+    set_motor_tim4(MOTOR_PWM_PERCENT);
+    set_motor_tim3(MOTOR_PWM_PERCENT);
+#else
+    set_motor_tim4(-MOTOR_PWM_PERCENT);
+    set_motor_tim3(-MOTOR_PWM_PERCENT);
+#endif
+#endif
 }
 
-static void set_right_motor(int speed)
+static void motor_tim4_start(void)
 {
-    uint32_t duty = pwm_from_percent(&htim3, speed);
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
+}
+
+static void motor_tim3_start(void)
+{
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+}
+
+static void motor_gpio_full_power_start(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    motor_apply_drive_mode();
+}
+
+static void set_motor_tim4(int speed)
+{
+    uint32_t duty = pwm_from_percent(&htim4, speed);
+
+    g_commanded_speed = speed;
 
     if (speed > 0) {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, duty);
     } else if (speed < 0) {
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, duty);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
+    } else {
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
+    }
+}
+
+static void set_motor_tim3(int speed)
+{
+    uint32_t duty = pwm_from_percent(&htim3, speed);
+    if (speed > 0) {
+        /* вперёд: LPWM=0, RPWM=ШИМ */
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);  /* RPWM PA6 */
+        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);       /* LPWM PA7 */
+    } else if (speed < 0) {
+        /* назад: LPWM=ШИМ, RPWM=0 */
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, duty);
     } else {
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
         __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
     }
+}
+
+static void set_left_motor(int speed)
+{
+    set_motor_tim4(speed);
+}
+
+static void set_right_motor(int speed)
+{
+    set_motor_tim3(speed);
 }
 
 static void stop_all_motors(void)
@@ -187,6 +271,116 @@ static void process_serial(void)
     }
 }
 
+static void led_write(GPIO_PinState state)
+{
+    HAL_GPIO_WritePin(LED_GPIO_PORT, LED_GPIO_PIN, state);
+}
+
+static void led_boot_sequence(void)
+{
+    for (uint8_t i = 0; i < 3; i++) {
+        led_write(GPIO_PIN_SET);
+        HAL_Delay(100);
+        led_write(GPIO_PIN_RESET);
+        HAL_Delay(100);
+    }
+    HAL_Delay(400);
+}
+
+static MotorLedPattern motor_led_read_pattern(void)
+{
+#if MOTOR_GPIO_FULL_POWER_TEST
+    uint32_t lpwm = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == GPIO_PIN_SET) ? 1U : 0U;
+    uint32_t rpwm = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == GPIO_PIN_SET) ? 1U : 0U;
+#else
+    uint32_t lpwm = __HAL_TIM_GET_COMPARE(&htim4, TIM_CHANNEL_1);
+    uint32_t rpwm = __HAL_TIM_GET_COMPARE(&htim4, TIM_CHANNEL_2);
+#endif
+    GPIO_PinState len = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0);
+    GPIO_PinState ren = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
+
+    if (len != GPIO_PIN_SET || ren != GPIO_PIN_SET) {
+        return MOTOR_LED_EN_FAULT;
+    }
+    if (g_commanded_speed != 0 && lpwm == 0 && rpwm == 0) {
+        return MOTOR_LED_PWM_FAULT;
+    }
+    if (lpwm > 0 && rpwm > 0) {
+        return MOTOR_LED_BOTH_PWM;
+    }
+    if (rpwm > 0) {
+        return MOTOR_LED_FORWARD;
+    }
+    if (lpwm > 0) {
+        return MOTOR_LED_REVERSE;
+    }
+    return MOTOR_LED_BRAKE;
+}
+
+/*
+ * LD2 показывает состояние управления (цикл 2 с):
+ *   1 вспышка — торможение (оба PWM = 0)
+ *   2 вспышки — назад (LPWM = ШИМ)
+ *   3 вспышки — вперёд (RPWM = ШИМ)
+ *   4 вспышки — оба ШИМ активны (конфликт)
+ *   5 вспышек — команда на мотор есть, но регистры ШИМ пустые
+ *   горит без погасаний — L_EN или R_EN не HIGH
+ * При включении: 3 быстрых blink = прошивка стартовала.
+ */
+static void motor_led_diag_update(void)
+{
+    static uint32_t cycle_start_ms = 0;
+    static MotorLedPattern last_pattern = MOTOR_LED_BRAKE;
+
+    uint32_t now = HAL_GetTick();
+    MotorLedPattern pattern = motor_led_read_pattern();
+
+    if (pattern == MOTOR_LED_EN_FAULT) {
+        led_write(GPIO_PIN_SET);
+        return;
+    }
+
+    if (cycle_start_ms == 0 || (now - cycle_start_ms) >= LED_DIAG_CYCLE_MS) {
+        cycle_start_ms = now;
+        last_pattern = pattern;
+    }
+
+    uint32_t phase_ms = now - cycle_start_ms;
+    uint8_t target_pulses = (uint8_t)last_pattern;
+    uint32_t pulse_slot = LED_DIAG_PULSE_MS + LED_DIAG_GAP_MS;
+    uint32_t active_window = target_pulses * pulse_slot;
+
+    if (phase_ms >= active_window) {
+        led_write(GPIO_PIN_RESET);
+        return;
+    }
+
+    uint8_t current_pulse = (uint8_t)(phase_ms / pulse_slot);
+    uint32_t within_pulse = phase_ms % pulse_slot;
+
+    if (current_pulse >= target_pulses) {
+        led_write(GPIO_PIN_RESET);
+        return;
+    }
+
+    if (within_pulse < LED_DIAG_PULSE_MS) {
+        led_write(GPIO_PIN_SET);
+    } else {
+        led_write(GPIO_PIN_RESET);
+    }
+}
+
+static void led_init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+    gpio.Pin = LED_GPIO_PIN;
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(LED_GPIO_PORT, &gpio);
+    HAL_GPIO_WritePin(LED_GPIO_PORT, LED_GPIO_PIN, GPIO_PIN_RESET);
+}
+
 static void run_self_test(void)
 {
     set_left_motor(30);
@@ -239,10 +433,29 @@ int main(void)
   MX_TIM3_Init();
   MX_USART1_UART_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);//L_EN
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);//R_EN
-  HAL_TIM_PWM_Start_IT(&htim4, TIM_CHANNEL_1);  //ШИМ 100 Гц реализован на ножке PB6 LPWM
-  HAL_TIM_PWM_Start_IT(&htim4, TIM_CHANNEL_2);  //ШИМ 100 Гц реализован на ножке PB7 RPWM
+  led_init();
+  led_boot_sequence();
+  /* 2-wire: оба EN постоянно включены */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET); /* L_EN драйвер 1 */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET); /* R_EN драйвер 1 */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET); /* R_EN драйвер 2 */
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_SET); /* L_EN драйвер 2 */
+#if MOTOR_GPIO_FULL_POWER_TEST
+  motor_gpio_full_power_start();
+#else
+  motor_tim4_start();
+  motor_tim3_start();
+#endif
+
+#if MOTOR_SPIN_CONTINUOUS
+  motor_apply_drive_mode();
+#else
+  set_motor_tim4(0);
+#if SELF_TEST
+  run_self_test();
+#endif
+#endif
+  last_command_ms = HAL_GetTick();
   /*HAL_StatusTypeDef HAL_USART_Transmit_IT (
 USART_HandleTypeDef *  husart, uint8_t * pTxData, uint16_t
 Size)  */
@@ -254,8 +467,18 @@ Size)  */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  HAL_UART_Transmit(&huart1,(uint8_t*)counterr, 1,1000);
-	  HAL_Delay(1000);
+	  process_serial();
+
+#if !MOTOR_SPIN_CONTINUOUS
+	  if (HAL_GetTick() - last_command_ms > COMMAND_TIMEOUT_MS) {
+		  stop_all_motors();
+	  }
+#else
+	  motor_apply_drive_mode();
+#endif
+
+	  motor_led_diag_update();
+	  HAL_Delay(10);
 	  /*
 	   * LPWM HIGH L_EN и R_EN HIGH
 	    */
@@ -360,6 +583,7 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 0 */
 
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
   TIM_MasterConfigTypeDef sMasterConfig = {0};
   TIM_OC_InitTypeDef sConfigOC = {0};
 
@@ -367,11 +591,20 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 0;
+  htim3.Init.Prescaler = 99;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 65535;
+  htim3.Init.Period = 1599;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim3, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
   if (HAL_TIM_PWM_Init(&htim3) != HAL_OK)
   {
     Error_Handler();
@@ -446,19 +679,17 @@ static void MX_TIM4_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 800;
+  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
   {
     Error_Handler();
   }
-  __HAL_TIM_DISABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_1);
   if (HAL_TIM_PWM_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
   {
     Error_Handler();
   }
-  __HAL_TIM_DISABLE_OCxPRELOAD(&htim4, TIM_CHANNEL_2);
   /* USER CODE BEGIN TIM4_Init 2 */
 
   /* USER CODE END TIM4_Init 2 */

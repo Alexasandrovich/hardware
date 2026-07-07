@@ -61,10 +61,23 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 
 /* USER CODE BEGIN Private defines */
-#define SELF_TEST            1
-#define PWM_LIMIT_PERCENT   60
-#define COMMAND_TIMEOUT_MS 500
-#define RX_LINE_MAX         64
+#define SELF_TEST              0
+/* RPWM только на PB7 (TIM4_CH2), на GND не вешать. REVERSE: LPWM=ШИМ, RPWM=0 с PB7. */
+#define MOTOR_DRIVE_REVERSE    1
+#define MOTOR_DRIVE_FORWARD    2
+#define MOTOR_DRIVE_MODE       MOTOR_DRIVE_REVERSE
+#define MOTOR_PWM_PERCENT      100
+#define MOTOR_SPIN_CONTINUOUS  1
+#define MOTOR_GPIO_FULL_POWER_TEST 0
+#define PWM_LIMIT_PERCENT      100
+#define COMMAND_TIMEOUT_MS    500
+#define RX_LINE_MAX            64
+/* NUCLEO-F411RE onboard LD2 (green) — диагностика мотора, см. motor_led_diag_update() */
+#define LED_GPIO_PORT          GPIOA
+#define LED_GPIO_PIN           GPIO_PIN_5
+#define LED_DIAG_CYCLE_MS      2000
+#define LED_DIAG_PULSE_MS      120
+#define LED_DIAG_GAP_MS        120
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

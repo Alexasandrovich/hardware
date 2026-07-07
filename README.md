@@ -111,6 +111,8 @@ GCC на Mac строже Windows. В `Core/Src/main.c` в блоке `USER CODE
 4. На *Confirm Perspective Switch* → **Switch**.
 5. **Resume** (F8) — MCU продолжит работу. Закончил → **Terminate**.
 
+После прошивки **LD2 (зелёный LED на NUCLEO)** мигает ~раз в секунду — прошивка жива (см. `led_init` в `main.c`).
+
 ### Debug Configurations (если не коннектится)
 
 **Run → Debug Configurations → Robot_car Debug → Debugger:**
@@ -150,3 +152,110 @@ CubeIDE →  правка main.c  →  Build  →  Debug
 ```
 
 Драйверы ST-LINK на Mac отдельно **не нужны** — достаточно пакетов ST выше.
+
+---
+
+## Документация (ссылки)
+
+Проверено для **NUCLEO-F411RE** + модуль **BTS7960 (IBT-2)**.
+
+### Плата NUCLEO / MCU
+
+| Документ | Зачем |
+|----------|-------|
+| [UM1724 — NUCLEO-64 (PDF)](https://www.st.com/resource/en/user_manual/um1724-stm32-nucleo64-boards-mb1136-stmicroelectronics.pdf) | Arduino/Morpho: **A0, D10**, GND, 5V — Figure 25 и далее |
+| [STM32F411RE datasheet (PDF)](https://www.st.com/resource/en/datasheet/stm32f411re.pdf) | Корпус LQFP64, лимиты по току на pin |
+| [RM0383 — Reference Manual (PDF)](https://www.st.com/resource/en/reference_manual/dm00119316-stm32f411xc-e-advanced-arm-based-32-bit-mcus-stmicroelectronics.pdf) | TIM, UART, GPIO, альтернативные функции |
+| [NUCLEO-F411RE на st.com](https://www.st.com/en/evaluation-tools/nucleo-f411re.html) | Страница платы, прошивки ST-LINK |
+
+### Драйвер моторов BTS7960
+
+| Документ | Зачем |
+|----------|-------|
+| [BTS7960 module — Handsontec (PDF)](https://www.handsontec.com/dataspecs/module/BTS7960%20Motor%20Driver.pdf) | Подписи клемм: B+, B−, VCC, GND, RPWM, LPWM, R_EN, L_EN |
+| [BTS7960B — Infineon](https://www.infineon.com/cms/en/product/power/motor-control-ics/intelligent-motor-control-ics/integrated-full-bridges/bts7960b/) | Логика полумостов, токи |
+
+### Raspberry Pi (следующие этапы)
+
+| Документ | Зачем |
+|----------|-------|
+| [RPi 5 Product Brief (PDF)](https://pip-assets.raspberrypi.com/categories/892-raspberry-pi-5/documents/RP-008348-DS-6-raspberry-pi-5-product-brief.pdf) | Питание, интерфейсы |
+| [USB-PD on Pi 5 (PDF)](https://pip-assets.raspberrypi.com/categories/685-app-notes-guides-whitepapers/documents/RP-009856-WP-1-USB%20Power%20delivery%20on%20Raspberry%20Pi%205.pdf) | Питание 5 V / 5 A |
+
+### Питание робота
+
+| Документ | Зачем |
+|----------|-------|
+| [XL4015 DC-DC datasheet (PDF)](http://www.xlsemi.com/datasheet/XL4015%20datasheet.pdf) | Понижение VBAT → 5 V |
+
+### Свои заметки и схемы (репозиторий obsidian_notes)
+
+| Материал | Путь |
+|----------|------|
+| Сборка 4WD, pinmap «полный» | `04 Resources/Electronics/Study/Lecture 6 - 4WD Robot Build Plan.md` |
+| KiCad: питание + сигналы | `04 Resources/Electronics/Study/KiCad/Robot_Power_Distribution/` |
+| Протокол Pi ↔ NUCLEO (позже) | `04 Resources/Electronics/Study/Lecture 8 - RBOT Protocol.md` |
+
+---
+
+## STM32 ↔ BTS7960: проводка под проект преподавателя (`Robot_car`)
+
+> **Важно:** в Lecture 6 / KiCad другой pinmap (PA0/PA1, PA6/PA7, PC0/PC1).  
+> **Сейчас ориентируемся на `.ioc` и комментарии в `main.c` от преподавателя** — иначе прошивка и провода не совпадут.
+
+### Что настроено в CubeMX / `main.c`
+
+| Сигнал в коде | MCU | NUCLEO (Arduino) | TIM4 ~100 Гц |
+|---------------|-----|------------------|--------------|
+| LPWM (левый ШИМ) | **PB6** | **D10** (CN5-2) | TIM4_CH1 |
+| RPWM (правый ШИМ) | **PB7** | Morpho **CN7-21** | TIM4_CH2 |
+| L_EN | **PB0** | **A3** (CN8-4) | GPIO |
+| R_EN | **PB1** | Morpho **CN10-24** | GPIO |
+
+В `main()` уже: `HAL_TIM_PWM_Start_IT(TIM4)`, `PB0/PB1 = HIGH`.
+
+**Почему TIM4 и ~100 Гц:** преподаватель задал Prescaler=99, Period=1599 → около **100 импульсов/с** на PB6/PB7. Для первого теста мотор **может** крутиться и так; в Lecture 6 позже рекомендуют **15–20 kHz** (меньше писка, лучше для BTS7960). Пока **не меняем** — сначала проверяем проводку.
+
+**Почему один TIM на два канала:** один таймер, два независимых «газа» — левый и правый ШИМ с одной частотой.
+
+### Один модуль BTS7960 (первый тест)
+
+Подключи **одну** сторону (левый драйвер по комментариям):
+
+| BTS7960 | → | NUCLEO / питание |
+|---------|---|------------------|
+| **GND** | → | GND (CN6 или Morpho) |
+| **VCC** | → | **5V** (CN6-5) — логика модуля |
+| **L_EN** | → | **PB0** (A3) |
+| **R_EN** | → | **PB1** (Morpho CN10-24) или тоже HIGH через перемычку на 3.3V |
+| **LPWM** | → | **PB6** (D10) |
+| **RPWM** | → | **GND** (пока только «назад» канал не нужен) *или* оставь не подключённым и крути только LPWM |
+| **B+ / B−** | → | аккумулятор **через предохранитель** (не от USB NUCLEO) |
+| **M+ / M−** | → | один мотор |
+
+Общая **GND** аккумулятора и NUCLEO обязательна.
+
+Для **вперёд на одном драйвере:** LPWM = PWM, RPWM = 0 (GND), оба EN = HIGH.
+
+### Два модуля BTS7960 (лево / право колёса)
+
+| Сторона | LPWM | RPWM | L_EN | R_EN |
+|---------|------|------|------|------|
+| **Левый** драйвер | PB6 (D10) | GND | PB0 (A3) | PB0 или 3.3V HIGH |
+| **Правый** драйвер | GND | PB7 (CN7-21) | PB1 или 3.3V | PB1 (CN10-24) |
+
+Так два PWM преподавателя = **по одному «газу» на сторону**, только **вперёд** (для учебного старта). Задний ход — позже (второй PWM на каждый драйвер или pinmap из Lecture 6).
+
+### Не трогать
+
+| Pin | Почему |
+|-----|--------|
+| **PA2, PA3** | USART2 → USB к Pi / Mac |
+| **PA5** | LD2 — уже мигает, проверка прошивки |
+| **PA13, PA14** | SWD — отладка |
+
+### Расхождение с Lecture 6 (на будущее)
+
+Lecture 6: **4 PWM** (PA0/PA1 + PA6/PA7) + **4 EN** — полный вперёд/назад.  
+Преподаватель: **2 PWM** (PB6/PB7) + **2 EN** — проще, сначала « газ на сторону ». Переход на Lecture 6 = правка CubeMX + прошивки + перепайка.
+
