@@ -1,0 +1,16 @@
+../Core/Src/rbot_app.c:22:12:clamp_speed	5
+../Core/Src/rbot_app.c:32:13:stop_motors	2
+../Core/Src/rbot_app.c:41:13:touch_wd	2
+../Core/Src/rbot_app.c:48:13:tx_frame	4
+../Core/Src/rbot_app.c:71:13:tx_evt	2
+../Core/Src/rbot_app.c:83:13:reply_ack	2
+../Core/Src/rbot_app.c:90:13:reply_nak	2
+../Core/Src/rbot_app.c:97:13:apply_drive	2
+../Core/Src/rbot_app.c:106:13:handle_frame	28
+../Core/Src/rbot_app.c:235:6:rbot_app_init	4
+../Core/Src/rbot_app.c:249:13:process_line	2
+../Core/Src/rbot_app.c:257:6:rbot_app_on_byte	6
+../Core/Src/rbot_app.c:281:6:rbot_app_tick	6
+../Core/Src/rbot_app.c:305:14:rbot_app_state	1
+../Core/Src/rbot_app.c:306:5:rbot_app_left	1
+../Core/Src/rbot_app.c:307:5:rbot_app_right	1

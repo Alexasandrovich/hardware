@@ -1,0 +1,16 @@
+../Core/Src/rbot_app.c:22:12:clamp_speed	24	static
+../Core/Src/rbot_app.c:32:13:stop_motors	8	static
+../Core/Src/rbot_app.c:41:13:touch_wd	8	static
+../Core/Src/rbot_app.c:48:13:tx_frame	308	static
+../Core/Src/rbot_app.c:71:13:tx_evt	288	static
+../Core/Src/rbot_app.c:83:13:reply_ack	16	static
+../Core/Src/rbot_app.c:90:13:reply_nak	32	static
+../Core/Src/rbot_app.c:97:13:apply_drive	16	static
+../Core/Src/rbot_app.c:106:13:handle_frame	144	static
+../Core/Src/rbot_app.c:235:6:rbot_app_init	24	static
+../Core/Src/rbot_app.c:249:13:process_line	176	static
+../Core/Src/rbot_app.c:257:6:rbot_app_on_byte	16	static
+../Core/Src/rbot_app.c:281:6:rbot_app_tick	32	static
+../Core/Src/rbot_app.c:305:14:rbot_app_state	4	static
+../Core/Src/rbot_app.c:306:5:rbot_app_left	4	static
+../Core/Src/rbot_app.c:307:5:rbot_app_right	4	static

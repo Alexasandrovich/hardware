@@ -1,4 +1,7 @@
 "./Core/Src/main.o"
+"./Core/Src/rbot_app.o"
+"./Core/Src/rbot_platform.o"
+"./Core/Src/rbot_protocol.o"
 "./Core/Src/stm32f4xx_hal_msp.o"
 "./Core/Src/stm32f4xx_it.o"
 "./Core/Src/syscalls.o"

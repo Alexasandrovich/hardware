@@ -1,0 +1,4 @@
+../Core/Src/rbot_protocol.c:9:9:rbot_xor_checksum	24	static
+../Core/Src/rbot_protocol.c:18:13:upper_cmd	32	static
+../Core/Src/rbot_protocol.c:27:6:rbot_parse_line	368	static
+../Core/Src/rbot_protocol.c:84:5:rbot_build_frame	188	static

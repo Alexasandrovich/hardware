@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include "rbot_app.h"
+#include "rbot_platform.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,9 +53,7 @@ UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
 uint16_t  counter_time = 0;
-static uint32_t last_command_ms = 0;
-static char rx_line[RX_LINE_MAX];
-static uint8_t rx_index = 0;
+static uint8_t uart2_rx_byte = 0;
 
 uint8_t rxData[128];
 uint8_t TxData[128];
@@ -74,200 +74,32 @@ static void MX_USART1_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static int clamp_int(int value, int min, int max)
+static void uart2_rx_start(void)
 {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
+    HAL_UART_Receive_IT(&huart2, &uart2_rx_byte, 1);
 }
 
-static void uart_print(const char *text)
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
-    HAL_UART_Transmit(&huart2, (uint8_t *)text, strlen(text), HAL_MAX_DELAY);
-}
-
-static uint32_t pwm_from_percent(TIM_HandleTypeDef *htim, int percent)
-{
-    uint32_t arr = __HAL_TIM_GET_AUTORELOAD(htim);
-    int limited = clamp_int(abs(percent), 0, PWM_LIMIT_PERCENT);
-    return (uint32_t)((arr * limited) / 100);
-}
-
-static int g_commanded_speed = 0;
-
-typedef enum {
-    MOTOR_LED_BRAKE = 1,       /* 1 вспышка за цикл */
-    MOTOR_LED_REVERSE = 2,     /* 2 вспышки — ШИМ на LPWM (назад) */
-    MOTOR_LED_FORWARD = 3,     /* 3 вспышки — ШИМ на RPWM (вперёд) */
-    MOTOR_LED_BOTH_PWM = 4,    /* 4 вспышки — оба ШИМ, торможение/ошибка */
-    MOTOR_LED_EN_FAULT = 0,    /* горит постоянно — L_EN или R_EN не HIGH */
-    MOTOR_LED_PWM_FAULT = 5,   /* 5 вспышек — команда есть, регистры ШИМ = 0 */
-} MotorLedPattern;
-
-/*
- * BTS7960 в режиме «2 провода» (robot-kit.ru):
- * L_EN и R_EN постоянно HIGH, скорость — ШИМ на L_PWM или R_PWM.
- * Вперёд:  L_PWM=0, R_PWM=ШИМ.  Назад: L_PWM=ШИМ, R_PWM=0.
- * Драйвер 1: PB6=LPWM (TIM4_CH1), PB7=RPWM (TIM4_CH2), PB0=L_EN, PB1=R_EN.
- * Драйвер 2: PA7=LPWM (TIM3_CH2), PA6=RPWM (TIM3_CH1), PC1=L_EN, PC0=R_EN.
- */
-static void set_motor_tim4(int speed);
-static void set_motor_tim3(int speed);
-
-static void motor_apply_drive_mode(void)
-{
-#if MOTOR_GPIO_FULL_POWER_TEST
-#if MOTOR_DRIVE_MODE == MOTOR_DRIVE_FORWARD
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_SET);
-    g_commanded_speed = MOTOR_PWM_PERCENT;
-#else
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_6, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_7, GPIO_PIN_RESET);
-    g_commanded_speed = -MOTOR_PWM_PERCENT;
-#endif
-#else
-#if MOTOR_DRIVE_MODE == MOTOR_DRIVE_FORWARD
-    set_motor_tim4(MOTOR_PWM_PERCENT);
-    set_motor_tim3(MOTOR_PWM_PERCENT);
-#else
-    set_motor_tim4(-MOTOR_PWM_PERCENT);
-    set_motor_tim3(-MOTOR_PWM_PERCENT);
-#endif
-#endif
-}
-
-static void motor_tim4_start(void)
-{
-    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
-}
-
-static void motor_tim3_start(void)
-{
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
-    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
-}
-
-static void motor_gpio_full_power_start(void)
-{
-    GPIO_InitTypeDef gpio = {0};
-
-    __HAL_RCC_GPIOB_CLK_ENABLE();
-
-    gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
-    gpio.Mode = GPIO_MODE_OUTPUT_PP;
-    gpio.Pull = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOB, &gpio);
-
-    motor_apply_drive_mode();
-}
-
-static void set_motor_tim4(int speed)
-{
-    uint32_t duty = pwm_from_percent(&htim4, speed);
-
-    g_commanded_speed = speed;
-
-    if (speed > 0) {
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, duty);
-    } else if (speed < 0) {
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, duty);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-    } else {
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
-    }
-}
-
-static void set_motor_tim3(int speed)
-{
-    uint32_t duty = pwm_from_percent(&htim3, speed);
-    if (speed > 0) {
-        /* вперёд: LPWM=0, RPWM=ШИМ */
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, duty);  /* RPWM PA6 */
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);       /* LPWM PA7 */
-    } else if (speed < 0) {
-        /* назад: LPWM=ШИМ, RPWM=0 */
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, duty);
-    } else {
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_1, 0);
-        __HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, 0);
-    }
-}
-
-static void set_left_motor(int speed)
-{
-    set_motor_tim4(speed);
-}
-
-static void set_right_motor(int speed)
-{
-    set_motor_tim3(speed);
-}
-
-static void stop_all_motors(void)
-{
-    set_left_motor(0);
-    set_right_motor(0);
-}
-
-static bool parse_command(const char *line, int *left, int *right)
-{
-    int l = 0;
-    int r = 0;
-
-    if (sscanf(line, "L %d R %d", &l, &r) == 2 ||
-        sscanf(line, "l %d r %d", &l, &r) == 2) {
-        *left = clamp_int(l, -100, 100);
-        *right = clamp_int(r, -100, 100);
-        return true;
-    }
-
-    return false;
-}
-
-static void process_serial(void)
-{
-    uint8_t ch;
-
-    if (HAL_UART_Receive(&huart2, &ch, 1, 10) != HAL_OK) {
+    if (huart->Instance == USART2) {
+        rbot_app_on_byte(uart2_rx_byte);
+        uart2_rx_start();
         return;
     }
 
-    if (ch == '\r' || ch == '\n') {
-        if (rx_index == 0) {
-            return;
-        }
-
-        rx_line[rx_index] = '\0';
-
-        int left = 0;
-        int right = 0;
-
-        if (parse_command(rx_line, &left, &right)) {
-            set_left_motor(left);
-            set_right_motor(right);
-            last_command_ms = HAL_GetTick();
-            uart_print("OK\r\n");
-        } else {
-            uart_print("ERR: use 'L 30 R -30'\r\n");
-        }
-
-        rx_index = 0;
-        memset(rx_line, 0, sizeof(rx_line));
-        return;
+    if (huart->Instance == USART1) {
+        HAL_UART_Receive_IT(&huart1, (uint8_t *)buff, 15);
     }
+}
 
-    if (rx_index < RX_LINE_MAX - 1) {
-        rx_line[rx_index++] = (char)ch;
-    } else {
-        rx_index = 0;
-        memset(rx_line, 0, sizeof(rx_line));
-        uart_print("ERR: line too long\r\n");
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART2) {
+        __HAL_UART_CLEAR_OREFLAG(huart);
+        __HAL_UART_CLEAR_NEFLAG(huart);
+        __HAL_UART_CLEAR_FEFLAG(huart);
+        HAL_UART_AbortReceive(huart);
+        uart2_rx_start();
     }
 }
 
@@ -287,89 +119,6 @@ static void led_boot_sequence(void)
     HAL_Delay(400);
 }
 
-static MotorLedPattern motor_led_read_pattern(void)
-{
-#if MOTOR_GPIO_FULL_POWER_TEST
-    uint32_t lpwm = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_6) == GPIO_PIN_SET) ? 1U : 0U;
-    uint32_t rpwm = (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_7) == GPIO_PIN_SET) ? 1U : 0U;
-#else
-    uint32_t lpwm = __HAL_TIM_GET_COMPARE(&htim4, TIM_CHANNEL_1);
-    uint32_t rpwm = __HAL_TIM_GET_COMPARE(&htim4, TIM_CHANNEL_2);
-#endif
-    GPIO_PinState len = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_0);
-    GPIO_PinState ren = HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1);
-
-    if (len != GPIO_PIN_SET || ren != GPIO_PIN_SET) {
-        return MOTOR_LED_EN_FAULT;
-    }
-    if (g_commanded_speed != 0 && lpwm == 0 && rpwm == 0) {
-        return MOTOR_LED_PWM_FAULT;
-    }
-    if (lpwm > 0 && rpwm > 0) {
-        return MOTOR_LED_BOTH_PWM;
-    }
-    if (rpwm > 0) {
-        return MOTOR_LED_FORWARD;
-    }
-    if (lpwm > 0) {
-        return MOTOR_LED_REVERSE;
-    }
-    return MOTOR_LED_BRAKE;
-}
-
-/*
- * LD2 показывает состояние управления (цикл 2 с):
- *   1 вспышка — торможение (оба PWM = 0)
- *   2 вспышки — назад (LPWM = ШИМ)
- *   3 вспышки — вперёд (RPWM = ШИМ)
- *   4 вспышки — оба ШИМ активны (конфликт)
- *   5 вспышек — команда на мотор есть, но регистры ШИМ пустые
- *   горит без погасаний — L_EN или R_EN не HIGH
- * При включении: 3 быстрых blink = прошивка стартовала.
- */
-static void motor_led_diag_update(void)
-{
-    static uint32_t cycle_start_ms = 0;
-    static MotorLedPattern last_pattern = MOTOR_LED_BRAKE;
-
-    uint32_t now = HAL_GetTick();
-    MotorLedPattern pattern = motor_led_read_pattern();
-
-    if (pattern == MOTOR_LED_EN_FAULT) {
-        led_write(GPIO_PIN_SET);
-        return;
-    }
-
-    if (cycle_start_ms == 0 || (now - cycle_start_ms) >= LED_DIAG_CYCLE_MS) {
-        cycle_start_ms = now;
-        last_pattern = pattern;
-    }
-
-    uint32_t phase_ms = now - cycle_start_ms;
-    uint8_t target_pulses = (uint8_t)last_pattern;
-    uint32_t pulse_slot = LED_DIAG_PULSE_MS + LED_DIAG_GAP_MS;
-    uint32_t active_window = target_pulses * pulse_slot;
-
-    if (phase_ms >= active_window) {
-        led_write(GPIO_PIN_RESET);
-        return;
-    }
-
-    uint8_t current_pulse = (uint8_t)(phase_ms / pulse_slot);
-    uint32_t within_pulse = phase_ms % pulse_slot;
-
-    if (current_pulse >= target_pulses) {
-        led_write(GPIO_PIN_RESET);
-        return;
-    }
-
-    if (within_pulse < LED_DIAG_PULSE_MS) {
-        led_write(GPIO_PIN_SET);
-    } else {
-        led_write(GPIO_PIN_RESET);
-    }
-}
-
 static void led_init(void)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -381,23 +130,24 @@ static void led_init(void)
     HAL_GPIO_WritePin(LED_GPIO_PORT, LED_GPIO_PIN, GPIO_PIN_RESET);
 }
 
-static void run_self_test(void)
+static void motor_led_diag_update(void)
 {
-    set_left_motor(30);
-    set_right_motor(30);
-    HAL_Delay(2000);
+    static uint32_t last_toggle = 0;
+    uint32_t now = HAL_GetTick();
 
-    stop_all_motors();
-    HAL_Delay(1000);
+    if (rbot_app_state() == RBOT_ARMED &&
+        (rbot_app_left() != 0 || rbot_app_right() != 0)) {
+        if (now - last_toggle >= 200U) {
+            last_toggle = now;
+            HAL_GPIO_TogglePin(LED_GPIO_PORT, LED_GPIO_PIN);
+        }
+        return;
+    }
 
-    set_left_motor(-30);
-    set_right_motor(-30);
-    HAL_Delay(2000);
-
-    stop_all_motors();
-    HAL_Delay(1000);
+    HAL_GPIO_WritePin(LED_GPIO_PORT, LED_GPIO_PIN, GPIO_PIN_RESET);
 }
 /* USER CODE END 0 */
+
 
 /**
   * @brief  The application entry point.
@@ -435,31 +185,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   led_init();
   led_boot_sequence();
-  /* 2-wire: оба EN постоянно включены */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET); /* L_EN драйвер 1 */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET); /* R_EN драйвер 1 */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET); /* R_EN драйвер 2 */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_SET); /* L_EN драйвер 2 */
-#if MOTOR_GPIO_FULL_POWER_TEST
-  motor_gpio_full_power_start();
-#else
-  motor_tim4_start();
-  motor_tim3_start();
-#endif
-
-#if MOTOR_SPIN_CONTINUOUS
-  motor_apply_drive_mode();
-#else
-  set_motor_tim4(0);
-#if SELF_TEST
-  run_self_test();
-#endif
-#endif
-  last_command_ms = HAL_GetTick();
-  /*HAL_StatusTypeDef HAL_USART_Transmit_IT (
-USART_HandleTypeDef *  husart, uint8_t * pTxData, uint16_t
-Size)  */
-
+  rbot_platform_init();
+  uart2_rx_start();
   HAL_UART_Receive_IT(&huart1, (uint8_t*)buff, 15);
   /* USER CODE END 2 */
 
@@ -467,18 +194,9 @@ Size)  */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  process_serial();
-
-#if !MOTOR_SPIN_CONTINUOUS
-	  if (HAL_GetTick() - last_command_ms > COMMAND_TIMEOUT_MS) {
-		  stop_all_motors();
-	  }
-#else
-	  motor_apply_drive_mode();
-#endif
-
+	  rbot_app_tick();
 	  motor_led_diag_update();
-	  HAL_Delay(10);
+	  HAL_Delay(1);
 	  /*
 	   * LPWM HIGH L_EN и R_EN HIGH
 	    */

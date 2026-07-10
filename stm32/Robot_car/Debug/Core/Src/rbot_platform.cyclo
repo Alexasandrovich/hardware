@@ -1,0 +1,9 @@
+../Core/Src/rbot_platform.c:14:12:clamp_int	3
+../Core/Src/rbot_platform.c:21:13:hal_uart_write	2
+../Core/Src/rbot_platform.c:30:17:hal_millis	1
+../Core/Src/rbot_platform.c:35:17:pwm_from_percent	1
+../Core/Src/rbot_platform.c:43:13:set_left_motor	3
+../Core/Src/rbot_platform.c:60:13:set_right_motor	3
+../Core/Src/rbot_platform.c:76:13:hal_motor_set	1
+../Core/Src/rbot_platform.c:82:13:motors_hw_init	1
+../Core/Src/rbot_platform.c:94:6:rbot_platform_init	1
