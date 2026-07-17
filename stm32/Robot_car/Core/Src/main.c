@@ -146,8 +146,40 @@ static void motor_led_diag_update(void)
 
     HAL_GPIO_WritePin(LED_GPIO_PORT, LED_GPIO_PIN, GPIO_PIN_RESET);
 }
-/* USER CODE END 0 */
 
+static void motors_hw_init(void)
+{
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim4, TIM_CHANNEL_2);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+    HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_2);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_SET);
+}
+
+#if SELF_TEST
+/* ШИМ сразу после старта, без Raspberry Pi. TIM4: PB6=CH1, PB7=CH2. */
+static void boot_pwm_self_test(void)
+{
+    uint32_t arr = __HAL_TIM_GET_AUTORELOAD(&htim4);
+    uint32_t duty = (arr * (uint32_t)MOTOR_PWM_PERCENT) / 100U;
+
+    motors_hw_init();
+
+#if MOTOR_DRIVE_MODE == MOTOR_DRIVE_REVERSE
+    /* LPWM=ШИМ на PB6, RPWM=0 на PB7 */
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, duty);
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, 0);
+#else
+    /* LPWM=0 на PB6, RPWM=ШИМ на PB7 */
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_1, 0);
+    __HAL_TIM_SET_COMPARE(&htim4, TIM_CHANNEL_2, duty);
+#endif
+}
+#endif
+/* USER CODE END 0 */
 
 /**
   * @brief  The application entry point.
@@ -188,6 +220,16 @@ int main(void)
   rbot_platform_init();
   uart2_rx_start();
   HAL_UART_Receive_IT(&huart1, (uint8_t*)buff, 15);
+
+  HAL_GPIO_WritePin(GPIOC, IN_1_DRV_1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOC, IN_2_DRV_1_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, IN_3_DRV_1_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, IN_4_DRV_1_Pin, GPIO_PIN_RESET);
+#if SELF_TEST
+  boot_pwm_self_test();
+#else
+  motors_hw_init();
+#endif
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -208,6 +250,8 @@ int main(void)
 	  //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0, GPIO_PIN_SET);
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
 	  HAL_Delay(10);*/
+
+
 	  counter_time++;
 	  //L_EN и R_EN высокий уровень для вращения моторов
 	  //L_PWM и R_PWM - выводы ШИМ
@@ -498,16 +542,23 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0|GPIO_PIN_1|IN_3_DRV_1_Pin|IN_2_DRV_1_Pin
+                          |IN_1_DRV_1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(CONV_OE_1_GPIO_Port, CONV_OE_1_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : PC0 PC1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1|IN_4_DRV_1_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CONV_OE_2_GPIO_Port, CONV_OE_2_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pins : PC0 PC1 CONV_OE_1_Pin IN_3_DRV_1_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|CONV_OE_1_Pin|IN_3_DRV_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -520,12 +571,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB1 */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1;
+  /*Configure GPIO pins : PB0 PB1 IN_4_DRV_1_Pin CONV_OE_2_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|IN_4_DRV_1_Pin|CONV_OE_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : IN_2_DRV_1_Pin IN_1_DRV_1_Pin */
+  GPIO_InitStruct.Pin = IN_2_DRV_1_Pin|IN_1_DRV_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* USER CODE END MX_GPIO_Init_2 */
