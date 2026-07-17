@@ -236,9 +236,13 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  rbot_app_tick();
-	  motor_led_diag_update();
-	  HAL_Delay(1);
+	  HAL_GPIO_WritePin(GPIOC, IN_1_DRV_1_Pin, GPIO_PIN_SET);
+	  HAL_GPIO_WritePin(GPIOC, IN_2_DRV_1_Pin, GPIO_PIN_RESET);
+	  HAL_GPIO_WritePin(GPIOC, IN_3_DRV_1_Pin, GPIO_PIN_SET);
+	  HAL_GPIO_WritePin(GPIOB, IN_4_DRV_1_Pin, GPIO_PIN_RESET);
+	  // rbot_app_tick();
+	  // motor_led_diag_update();
+	  // HAL_Delay(1);
 	  /*
 	   * LPWM HIGH L_EN и R_EN HIGH
 	    */
@@ -252,7 +256,6 @@ int main(void)
 	  HAL_Delay(10);*/
 
 
-	  counter_time++;
 	  //L_EN и R_EN высокий уровень для вращения моторов
 	  //L_PWM и R_PWM - выводы ШИМ
 	  /*
@@ -557,8 +560,8 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CONV_OE_2_GPIO_Port, CONV_OE_2_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pins : PC0 PC1 CONV_OE_1_Pin IN_3_DRV_1_Pin */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|CONV_OE_1_Pin|IN_3_DRV_1_Pin;
+  /*Configure GPIO pins : PC0 PC1 CONV_OE_1_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|CONV_OE_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -571,19 +574,26 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB0 PB1 IN_4_DRV_1_Pin CONV_OE_2_Pin */
-  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|IN_4_DRV_1_Pin|CONV_OE_2_Pin;
+  /*Configure GPIO pins : PB0 PB1 CONV_OE_2_Pin */
+  GPIO_InitStruct.Pin = GPIO_PIN_0|GPIO_PIN_1|CONV_OE_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : IN_2_DRV_1_Pin IN_1_DRV_1_Pin */
-  GPIO_InitStruct.Pin = IN_2_DRV_1_Pin|IN_1_DRV_1_Pin;
+  /*Configure GPIO pins : IN_3_DRV_1_Pin IN_2_DRV_1_Pin IN_1_DRV_1_Pin */
+  GPIO_InitStruct.Pin = IN_3_DRV_1_Pin|IN_2_DRV_1_Pin|IN_1_DRV_1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IN_4_DRV_1_Pin */
+  GPIO_InitStruct.Pin = IN_4_DRV_1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_OD;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(IN_4_DRV_1_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
   /* USER CODE END MX_GPIO_Init_2 */

@@ -80,7 +80,7 @@ void Error_Handler(void);
 #define MOTOR_DRIVE_FORWARD    2
 #define MOTOR_DRIVE_MODE       MOTOR_DRIVE_REVERSE
 /* 50% — на осциллографе видны импульсы. 100% почти всегда HIGH. */
-#define MOTOR_PWM_PERCENT      50
+#define MOTOR_PWM_PERCENT      100
 #define MOTOR_SPIN_CONTINUOUS  0
 #define MOTOR_GPIO_FULL_POWER_TEST 0
 #define PWM_LIMIT_PERCENT      100
